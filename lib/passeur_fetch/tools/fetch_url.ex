@@ -42,12 +42,24 @@ defmodule PasseurFetch.Tools.FetchUrl do
     end
   end
 
-  defp fetch(url) do
+  @max_redirects 5
+
+  defp fetch(url), do: fetch(url, @max_redirects)
+
+  defp fetch(_url, 0), do: {:error, "Too many redirects"}
+
+  defp fetch(url, redirects_remaining) do
     request = Finch.build(:get, url)
 
     case Finch.request(request, PasseurFetch.Finch) do
       {:ok, %Finch.Response{status: status, body: body}} when status in 200..299 ->
         {:ok, body}
+
+      {:ok, %Finch.Response{status: status, headers: headers}} when status in [301, 302, 303, 307, 308] ->
+        case List.keyfind(headers, "location", 0) do
+          {_, location} -> fetch(location, redirects_remaining - 1)
+          nil -> {:error, "HTTP #{status} with no location header"}
+        end
 
       {:ok, %Finch.Response{status: status}} ->
         {:error, "HTTP #{status}"}
