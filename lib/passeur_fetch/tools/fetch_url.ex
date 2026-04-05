@@ -2,10 +2,12 @@ defmodule PasseurFetch.Tools.FetchUrl do
   @moduledoc "Fetch a URL and extract readable content"
 
   use Hermes.Server.Component, type: :tool
+  require Logger
 
   @chars_per_token 4
   @max_redirects 5
-  @request_timeout_ms 30_000
+  @request_timeout_ms 15_000
+  @overall_timeout_ms 30_000
   @max_body_bytes 5_000_000
   @user_agent "PasseurFetch/0.1"
 
@@ -19,26 +21,42 @@ defmodule PasseurFetch.Tools.FetchUrl do
   @impl true
   def execute(%{url: url} = params, frame) do
     content_token_limit = Map.get(params, :content_token_limit)
+    Logger.info("Fetching #{url}")
 
-    with :ok <- validate_url(url),
-         {:ok, html} <- fetch(url),
-         {:ok, text} <- extract_text(html) do
-      text = maybe_truncate(text, content_token_limit)
+    task = Task.async(fn -> do_fetch(url, content_token_limit) end)
 
-      {:reply,
-       Hermes.Server.Response.tool()
-       |> Hermes.Server.Response.text(text), frame}
-    else
-      {:error, reason} ->
+    case Task.yield(task, @overall_timeout_ms) || Task.shutdown(task, :brutal_kill) do
+      {:ok, {:ok, text}} ->
+        Logger.info("Successfully fetched #{url} (#{String.length(text)} chars)")
+
+        {:reply,
+         Hermes.Server.Response.tool()
+         |> Hermes.Server.Response.text(text), frame}
+
+      {:ok, {:error, reason}} ->
+        Logger.warning("Failed to fetch #{url}: #{reason}")
+
         {:reply,
          Hermes.Server.Response.tool()
          |> Hermes.Server.Response.text("Error: #{reason}"), frame}
+
+      nil ->
+        Logger.error("Timed out fetching #{url} after #{@overall_timeout_ms}ms")
+
+        {:reply,
+         Hermes.Server.Response.tool()
+         |> Hermes.Server.Response.text("Error: Operation timed out after #{@overall_timeout_ms}ms"), frame}
+    end
+  end
+
+  defp do_fetch(url, content_token_limit) do
+    with :ok <- validate_url(url),
+         {:ok, html} <- fetch(url),
+         {:ok, text} <- extract_text(html) do
+      {:ok, maybe_truncate(text, content_token_limit)}
     end
   rescue
-    e ->
-      {:reply,
-       Hermes.Server.Response.tool()
-       |> Hermes.Server.Response.text("Error: #{Exception.message(e)}"), frame}
+    e -> {:error, Exception.message(e)}
   end
 
   defp validate_url(url) do
@@ -60,6 +78,8 @@ defmodule PasseurFetch.Tools.FetchUrl do
 
     case Finch.request(request, PasseurFetch.Finch, receive_timeout: @request_timeout_ms) do
       {:ok, %Finch.Response{status: status, headers: headers, body: body}} when status in 200..299 ->
+        Logger.debug("HTTP #{status} from #{url} (#{byte_size(body)} bytes)")
+
         with :ok <- validate_content_type(headers),
              :ok <- validate_body_size(body) do
           {:ok, body}
@@ -67,8 +87,13 @@ defmodule PasseurFetch.Tools.FetchUrl do
 
       {:ok, %Finch.Response{status: status, headers: headers}} when status in [301, 302, 303, 307, 308] ->
         case List.keyfind(headers, "location", 0) do
-          {_, location} -> fetch(resolve_url(url, location), redirects_remaining - 1)
-          nil -> {:error, "HTTP #{status} with no location header"}
+          {_, location} ->
+            resolved = resolve_url(url, location)
+            Logger.debug("Redirected #{status} from #{url} to #{resolved}")
+            fetch(resolved, redirects_remaining - 1)
+
+          nil ->
+            {:error, "HTTP #{status} with no location header"}
         end
 
       {:ok, %Finch.Response{status: status}} ->
