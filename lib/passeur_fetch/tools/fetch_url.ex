@@ -4,6 +4,10 @@ defmodule PasseurFetch.Tools.FetchUrl do
   use Hermes.Server.Component, type: :tool
 
   @chars_per_token 4
+  @max_redirects 5
+  @request_timeout_ms 30_000
+  @max_body_bytes 5_000_000
+  @user_agent "PasseurFetch/0.1"
 
   schema do
     field :url, {:required, :string}, description: "URL to fetch (http or https)"
@@ -42,18 +46,19 @@ defmodule PasseurFetch.Tools.FetchUrl do
     end
   end
 
-  @max_redirects 5
-
   defp fetch(url), do: fetch(url, @max_redirects)
 
   defp fetch(_url, 0), do: {:error, "Too many redirects"}
 
   defp fetch(url, redirects_remaining) do
-    request = Finch.build(:get, url)
+    request = Finch.build(:get, url, [{"user-agent", @user_agent}])
 
-    case Finch.request(request, PasseurFetch.Finch) do
-      {:ok, %Finch.Response{status: status, body: body}} when status in 200..299 ->
-        {:ok, body}
+    case Finch.request(request, PasseurFetch.Finch, receive_timeout: @request_timeout_ms) do
+      {:ok, %Finch.Response{status: status, headers: headers, body: body}} when status in 200..299 ->
+        with :ok <- validate_content_type(headers),
+             :ok <- validate_body_size(body) do
+          {:ok, body}
+        end
 
       {:ok, %Finch.Response{status: status, headers: headers}} when status in [301, 302, 303, 307, 308] ->
         case List.keyfind(headers, "location", 0) do
@@ -64,8 +69,34 @@ defmodule PasseurFetch.Tools.FetchUrl do
       {:ok, %Finch.Response{status: status}} ->
         {:error, "HTTP #{status}"}
 
+      {:error, %Mint.TransportError{reason: :timeout}} ->
+        {:error, "Request timed out"}
+
       {:error, reason} ->
         {:error, "Request failed: #{inspect(reason)}"}
+    end
+  end
+
+  defp validate_content_type(headers) do
+    case List.keyfind(headers, "content-type", 0) do
+      {_, content_type} ->
+        if String.contains?(content_type, "html") do
+          :ok
+        else
+          {:error, "Expected HTML content, got: #{content_type}"}
+        end
+
+      nil ->
+        # No content-type header, try to parse anyway
+        :ok
+    end
+  end
+
+  defp validate_body_size(body) do
+    if byte_size(body) <= @max_body_bytes do
+      :ok
+    else
+      {:error, "Response too large (#{byte_size(body)} bytes, max #{@max_body_bytes})"}
     end
   end
 
