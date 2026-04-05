@@ -34,6 +34,11 @@ defmodule PasseurFetch.Tools.FetchUrl do
          Hermes.Server.Response.tool()
          |> Hermes.Server.Response.text("Error: #{reason}"), frame}
     end
+  rescue
+    e ->
+      {:reply,
+       Hermes.Server.Response.tool()
+       |> Hermes.Server.Response.text("Error: #{Exception.message(e)}"), frame}
   end
 
   defp validate_url(url) do
@@ -62,7 +67,7 @@ defmodule PasseurFetch.Tools.FetchUrl do
 
       {:ok, %Finch.Response{status: status, headers: headers}} when status in [301, 302, 303, 307, 308] ->
         case List.keyfind(headers, "location", 0) do
-          {_, location} -> fetch(location, redirects_remaining - 1)
+          {_, location} -> fetch(resolve_url(url, location), redirects_remaining - 1)
           nil -> {:error, "HTTP #{status} with no location header"}
         end
 
@@ -74,6 +79,17 @@ defmodule PasseurFetch.Tools.FetchUrl do
 
       {:error, reason} ->
         {:error, "Request failed: #{inspect(reason)}"}
+    end
+  end
+
+  defp resolve_url(base_url, location) do
+    uri = URI.parse(location)
+
+    if uri.scheme do
+      location
+    else
+      base = URI.parse(base_url)
+      URI.to_string(%{base | path: uri.path, query: uri.query, fragment: uri.fragment})
     end
   end
 
