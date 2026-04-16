@@ -26,7 +26,7 @@ Register the tool in your MCP server:
 
 ```elixir
 defmodule MyServer.MCPServer do
-  use Hermes.Server,
+  use Anubis.Server,
     name: "MyServer",
     version: "0.1.0",
     capabilities: [:tools]

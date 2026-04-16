@@ -1,7 +1,7 @@
 defmodule PasseurFetch.Tools.FetchUrl do
   @moduledoc "Fetch a URL and extract readable content"
 
-  use Hermes.Server.Component, type: :tool
+  use Anubis.Server.Component, type: :tool
   require Logger
 
   @chars_per_token 4
@@ -30,22 +30,22 @@ defmodule PasseurFetch.Tools.FetchUrl do
         Logger.info("Successfully fetched #{url} (#{String.length(text)} chars)")
 
         {:reply,
-         Hermes.Server.Response.tool()
-         |> Hermes.Server.Response.text(text), frame}
+         Anubis.Server.Response.tool()
+         |> Anubis.Server.Response.text(text), frame}
 
       {:ok, {:error, reason}} ->
         Logger.warning("Failed to fetch #{url}: #{reason}")
 
         {:reply,
-         Hermes.Server.Response.tool()
-         |> Hermes.Server.Response.text("Error: #{reason}"), frame}
+         Anubis.Server.Response.tool()
+         |> Anubis.Server.Response.text("Error: #{reason}"), frame}
 
       nil ->
         Logger.error("Timed out fetching #{url} after #{@overall_timeout_ms}ms")
 
         {:reply,
-         Hermes.Server.Response.tool()
-         |> Hermes.Server.Response.text("Error: Operation timed out after #{@overall_timeout_ms}ms"), frame}
+         Anubis.Server.Response.tool()
+         |> Anubis.Server.Response.text("Error: Operation timed out after #{@overall_timeout_ms}ms"), frame}
     end
   end
 
