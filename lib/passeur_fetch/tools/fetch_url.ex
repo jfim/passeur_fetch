@@ -51,12 +51,67 @@ defmodule PasseurFetch.Tools.FetchUrl do
 
   defp do_fetch(url, content_token_limit) do
     with :ok <- validate_url(url),
-         {:ok, html} <- fetch(url),
+         {:ok, html} <- fetch_with_fallback(url),
          {:ok, text} <- extract_text(html) do
       {:ok, maybe_truncate(text, content_token_limit)}
     end
   rescue
     e -> {:error, Exception.message(e)}
+  end
+
+  defp fetch_with_fallback(url) do
+    case fetch(url) do
+      {:error, {:http_4xx, status}} ->
+        case PasseurFetch.Config.passe_partout_host() do
+          nil ->
+            {:error, "HTTP #{status}"}
+
+          host ->
+            Logger.info("HTTP #{status} from #{url}, falling back to passe-partout")
+            fetch_via_passe_partout(host, url)
+        end
+
+      other ->
+        other
+    end
+  end
+
+  defp fetch_via_passe_partout(host, url) do
+    endpoint = String.trim_trailing(host, "/") <> "/fetch"
+    body = Jason.encode!(%{url: url})
+
+    headers =
+      [{"content-type", "application/json"}, {"user-agent", @user_agent}] ++
+        case PasseurFetch.Config.passe_partout_bearer_token() do
+          nil -> []
+          token -> [{"authorization", "Bearer " <> token}]
+        end
+
+    request = Finch.build(:post, endpoint, headers, body)
+
+    case Finch.request(request, PasseurFetch.Finch, receive_timeout: @request_timeout_ms) do
+      {:ok, %Finch.Response{status: status, body: resp_body}} when status in 200..299 ->
+        case Jason.decode(resp_body) do
+          {:ok, %{"html" => html, "status" => upstream_status}}
+          when is_binary(html) and upstream_status in 200..299 ->
+            with :ok <- validate_body_size(html), do: {:ok, html}
+
+          {:ok, %{"status" => upstream_status}} ->
+            {:error, "passe-partout upstream returned HTTP #{upstream_status}"}
+
+          {:ok, _} ->
+            {:error, "passe-partout response missing html"}
+
+          {:error, _} ->
+            {:error, "passe-partout returned invalid JSON"}
+        end
+
+      {:ok, %Finch.Response{status: status}} ->
+        {:error, "passe-partout returned HTTP #{status}"}
+
+      {:error, reason} ->
+        {:error, "passe-partout request failed: #{inspect(reason)}"}
+    end
   end
 
   defp validate_url(url) do
@@ -95,6 +150,9 @@ defmodule PasseurFetch.Tools.FetchUrl do
           nil ->
             {:error, "HTTP #{status} with no location header"}
         end
+
+      {:ok, %Finch.Response{status: status}} when status in 400..499 ->
+        {:error, {:http_4xx, status}}
 
       {:ok, %Finch.Response{status: status}} ->
         {:error, "HTTP #{status}"}
