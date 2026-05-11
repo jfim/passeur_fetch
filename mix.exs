@@ -30,7 +30,7 @@ defmodule PasseurFetch.MixProject do
 
   defp deps do
     [
-      {:anubis_mcp, "~> 1.0"},
+      {:anubis_mcp, git: "https://github.com/jfim/anubis-mcp.git", branch: "non-upstreamed-fixes", override: true},
       {:jason, "~> 1.4"},
       {:readability, "~> 0.12.1"},
       {:htmd, "~> 0.2.0"},
