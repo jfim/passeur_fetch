@@ -4,7 +4,10 @@ defmodule PasseurFetch.Tools.FetchUrlTest do
   test "fetches a URL and returns markdown with headers, images, and bullet lists" do
     result =
       PasseurFetch.Tools.FetchUrl.execute(
-        %{url: "https://blog.jean-francois.im/posts/building-a-simple-air-quality-monitor/index.en.html"},
+        %{
+          url:
+            "https://blog.jean-francois.im/posts/building-a-simple-air-quality-monitor/index.en.html"
+        },
         %{}
       )
 

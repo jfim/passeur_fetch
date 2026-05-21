@@ -20,10 +20,11 @@ defmodule PasseurFetch.Tools.FetchUrl do
   @user_agent "PasseurFetch/0.1"
 
   schema do
-    field :url, {:required, :string}, description: "URL to fetch (http or https)"
+    field(:url, {:required, :string}, description: "URL to fetch (http or https)")
 
-    field :content_token_limit, :integer,
+    field(:content_token_limit, :integer,
       description: "Maximum estimated tokens to return (approx 4 chars per token)"
+    )
   end
 
   @impl true
@@ -53,7 +54,9 @@ defmodule PasseurFetch.Tools.FetchUrl do
 
         {:reply,
          Anubis.Server.Response.tool()
-         |> Anubis.Server.Response.text("Error: Operation timed out after #{@overall_timeout_ms}ms"), frame}
+         |> Anubis.Server.Response.text(
+           "Error: Operation timed out after #{@overall_timeout_ms}ms"
+         ), frame}
     end
   end
 
@@ -103,7 +106,8 @@ defmodule PasseurFetch.Tools.FetchUrl do
               get_tab_text(base, tab_id)
 
             true ->
-              {:error, "passe-partout returned unsupported content-type: #{content_type || "unknown"}"}
+              {:error,
+               "passe-partout returned unsupported content-type: #{content_type || "unknown"}"}
           end
 
         delete_tab(base, tab_id)
@@ -221,7 +225,9 @@ defmodule PasseurFetch.Tools.FetchUrl do
     request = Finch.build(:delete, base <> "/tabs/#{tab_id}", passe_partout_headers())
 
     case Finch.request(request, PasseurFetch.Finch, receive_timeout: @request_timeout_ms) do
-      {:ok, _} -> :ok
+      {:ok, _} ->
+        :ok
+
       {:error, reason} ->
         Logger.warning("Failed to delete passe-partout tab #{tab_id}: #{inspect(reason)}")
         :ok
@@ -246,7 +252,8 @@ defmodule PasseurFetch.Tools.FetchUrl do
     request = Finch.build(:get, url, [{"user-agent", @user_agent}])
 
     case Finch.request(request, PasseurFetch.Finch, receive_timeout: @request_timeout_ms) do
-      {:ok, %Finch.Response{status: status, headers: headers, body: body}} when status in 200..299 ->
+      {:ok, %Finch.Response{status: status, headers: headers, body: body}}
+      when status in 200..299 ->
         Logger.debug("HTTP #{status} from #{url} (#{byte_size(body)} bytes)")
         content_type = get_content_type(headers)
 
@@ -255,7 +262,8 @@ defmodule PasseurFetch.Tools.FetchUrl do
           {:ok, body, content_type}
         end
 
-      {:ok, %Finch.Response{status: status, headers: headers}} when status in [301, 302, 303, 307, 308] ->
+      {:ok, %Finch.Response{status: status, headers: headers}}
+      when status in [301, 302, 303, 307, 308] ->
         case List.keyfind(headers, "location", 0) do
           {_, location} ->
             resolved = resolve_url(url, location)
@@ -315,6 +323,7 @@ defmodule PasseurFetch.Tools.FetchUrl do
 
   defp text_content_type?(ct) do
     ct = String.downcase(ct)
+
     String.starts_with?(ct, "text/") or String.contains?(ct, "json") or
       String.contains?(ct, "xml") or String.contains?(ct, "javascript") or
       String.contains?(ct, "yaml")
